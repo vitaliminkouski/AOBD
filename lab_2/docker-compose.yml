@@ -1,0 +1,98 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - stream-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+    networks:
+      - stream-network
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8085:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    networks:
+      - stream-network
+
+  spark:
+    image: apache/spark:python3
+    container_name: spark
+    hostname: spark
+    user: root
+    depends_on:
+      - kafka
+    command: ["sleep", "infinity"]
+    ports:
+      - "4040:4040"
+    volumes:
+      - ./:/workspace
+    networks:
+      - stream-network
+
+  flink-jobmanager:
+    build:
+      context: .
+      dockerfile: Dockerfile.flink
+    image: lab2-flink:1.20
+    container_name: flink-jobmanager
+    depends_on:
+      - kafka
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        parallelism.default: 2
+    volumes:
+      - ./:/workspace
+    networks:
+      - stream-network
+
+  flink-taskmanager:
+    image: lab2-flink:1.20
+    container_name: flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 6
+    volumes:
+      - ./:/workspace
+    networks:
+      - stream-network
+
+networks:
+  stream-network:
+    driver: bridge
